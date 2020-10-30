@@ -1,0 +1,332 @@
+- job:
+    name: neutron-tempest-base
+    description: Base job for tempest to test Neutron
+    parent: tempest-integrated-networking
+    abstract: true
+    timeout: 10800
+    required-projects:
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+    pre-run: playbooks/configure_ebtables.yaml
+    vars:
+      tempest_concurrency: 4
+      devstack_localrc:
+        Q_ML2_TENANT_NETWORK_TYPE: vxlan
+        Q_ML2_PLUGIN_MECHANISM_DRIVERS: openvswitch,linuxbridge
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+      devstack_services:
+        # OVN services
+        ovn-controller: false
+        ovn-northd: false
+        ovs-vswitchd: false
+        ovsdb-server: false
+        q-ovn-metadata-agent: false
+        # Neutron services
+        q-agt: true
+        q-dhcp: true
+        q-l3: true
+        q-meta: true
+        q-metering: true
+        q-svc: true
+
+- job:
+    name: neutron-ovs-base
+    description: Base job for tempest to test Neutron with ML2/OVS driver
+    parent: neutron-tempest-base
+    vars:
+      devstack_localrc:
+        Q_AGENT: openvswitch
+
+- job:
+    name: neutron-tempest-dvr
+    parent: neutron-ovs-base
+    vars:
+      devstack_localrc:
+        Q_DVR_MODE: dvr_snat
+      devstack_services:
+        br-ex-tcpdump: true
+        br-int-flows: true
+    irrelevant-files: &irrelevant-files
+      - ^(test-|)requirements.txt$
+      - ^.*\.rst$
+      - ^doc/.*$
+      - ^neutron/locale/.*$
+      - ^neutron/tests/unit/.*$
+      - ^releasenotes/.*$
+      - ^setup.cfg$
+      - ^tools/.*$
+      - ^tox.ini$
+      - ^vagrant/.*$
+      - ^migration/.*$
+
+- job:
+    name: neutron-tempest-linuxbridge
+    parent: neutron-tempest-base
+    vars:
+      devstack_localrc:
+        Q_AGENT: linuxbridge
+    irrelevant-files: *irrelevant-files
+
+- job:
+    name: neutron-tempest-iptables_hybrid
+    parent: neutron-ovs-base
+    vars:
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+      devstack_services:
+        tls-proxy: false
+        tempest: true
+        neutron-dns: true
+        neutron-qos: true
+        neutron-segments: true
+        neutron-trunk: true
+        neutron-uplink-status-propagation: true
+        br-ex-tcpdump: true
+        br-int-flows: true
+      devstack_local_conf:
+        post-config:
+          $NEUTRON_CONF:
+            QUOTAS:
+              quota_router: 100
+              quota_floatingip: 500
+              quota_security_group: 100
+              quota_security_group_rule: 1000
+          # NOTE(slaweq): We can get rid of this hardcoded absolute path when
+          # devstack-tempest job will be switched to use lib/neutron instead of
+          # lib/neutron-legacy
+          "/$NEUTRON_CORE_PLUGIN_CONF":
+            ml2_type_vlan:
+              network_vlan_ranges: foo:1:10
+            agent:
+              enable_distributed_routing: True
+              l2_population: True
+              tunnel_types: vxlan,gre
+              arp_responder: True
+            securitygroup:
+              firewall_driver: iptables_hybrid
+          $NEUTRON_L3_CONF:
+            agent:
+              availability_zone: nova
+          $NEUTRON_DHCP_CONF:
+            agent:
+              availability_zone: nova
+        test-config:
+          $TEMPEST_CONFIG:
+            neutron_plugin_options:
+              provider_vlans: foo,
+              agent_availability_zone: nova
+              image_is_advanced: true
+              available_type_drivers: flat,geneve,vlan,gre,local,vxlan
+    irrelevant-files: *irrelevant-files
+
+- job:
+    name: neutron-tempest-postgres-full
+    parent: tempest-integrated-networking
+    timeout: 10800
+    required-projects:
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+    vars:
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+      devstack_services:
+        postgresql: true
+        mysql: false
+        br-ex-tcpdump: true
+        br-int-flows: true
+    irrelevant-files: *irrelevant-files
+
+- job:
+    name: neutron-tempest-mariadb-full
+    parent: tempest-integrated-networking
+    timeout: 10800
+    required-projects:
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+    vars:
+      devstack_localrc:
+        MYSQL_SERVICE_NAME: mariadb
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+      devstack_services:
+        br-ex-tcpdump: true
+        br-int-flows: true
+    # NOTE(ralonsoh): once MariaDB default version in Ubuntu is bumped to
+    # >10.1, this workaround can be removed (bug 1855912)
+    pre-run: playbooks/add_mariadb_repo.yaml
+    irrelevant-files: *irrelevant-files
+
+- job:
+    name: neutron-tempest-with-os-ken-master
+    parent: tempest-integrated-networking
+    timeout: 10800
+    required-projects:
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+      - openstack/os-ken
+    vars:
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+
+- job:
+    name: neutron-tempest-with-neutron-lib-master
+    parent: tempest-integrated-networking
+    timeout: 10800
+    required-projects:
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+      - openstack/neutron-lib
+    vars:
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+
+- job:
+    name: neutron-tempest-with-uwsgi
+    parent: tempest-integrated-networking
+    description: Run neutron Tempest tests with uwsgi
+    timeout: 10800
+    vars:
+      devstack_localrc:
+        NEUTRON_DEPLOY_MOD_WSGI: true
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron.git
+      devstack_services:
+        br-ex-tcpdump: true
+        br-int-flows: true
+    irrelevant-files: *irrelevant-files
+
+- job:
+    name: neutron-ovn-base
+    description: Base job for devstack/tempest to test Neutron with ovn driver.
+    parent: tempest-integrated-networking
+    timeout: 10800
+    required-projects: &ovn-base-required-projects
+      - openstack/devstack-gate
+      - openstack/neutron
+      - openstack/tempest
+    irrelevant-files: *irrelevant-files
+    vars: &ovn-base-vars
+      tempest_concurrency: 4
+      devstack_local_conf:
+        test-config:
+          $TEMPEST_CONFIG:
+            neutron_plugin_options:
+              is_igmp_snooping_enabled: True
+      devstack_localrc:
+        Q_AGENT: ovn
+        ML2_L3_PLUGIN: ovn-router,trunk
+        Q_ML2_PLUGIN_MECHANISM_DRIVERS: ovn,logger
+        Q_ML2_PLUGIN_TYPE_DRIVERS: local,flat,vlan,geneve
+        Q_ML2_TENANT_NETWORK_TYPE: geneve
+        Q_USE_PROVIDERNET_FOR_PUBLIC: true
+        PHYSICAL_NETWORK: public
+        ENABLE_CHASSIS_AS_GW: true
+        OVN_L3_CREATE_PUBLIC_NETWORK: true
+        OVN_DBS_LOG_LEVEL: dbg
+        USE_PYTHON3: True
+        BUILD_TIMEOUT: 784
+        ENABLE_TLS: True
+        OVN_IGMP_SNOOPING_ENABLE: True
+      devstack_plugins:
+        neutron: https://opendev.org/openstack/neutron
+      zuul_copy_output:
+        '{{ devstack_base_dir }}/data/ovs': 'logs'
+        '{{ devstack_base_dir }}/data/ovn': 'logs'
+        '{{ devstack_log_dir }}/ovsdb-server-nb.log': 'logs'
+        '{{ devstack_log_dir }}/ovsdb-server-sb.log': 'logs'
+      extensions_to_txt:
+        db: true
+      devstack_services:
+        br-ex-tcpdump: true
+        br-int-flows: true
+        c-api: true
+        c-sch: true
+        c-vol: true
+        dstat: true
+        g-api: true
+        g-reg: true
+        keystone: true
+        n-api-meta: true
+        n-api: true
+        n-cauth: true
+        n-cond-cell1: true
+        n-cpu: true
+        n-novnc-cell1: true
+        n-sch: true
+        n-super-cond: true
+        q-ovn-metadata-agent: true
+        ovn-controller: true
+        ovn-northd: true
+        ovs-vswitchd: true
+        ovsdb-server: true
+        placement-api: true
+        q-svc: true
+        q-dns: true
+        c-bak: false
+        etcd: false
+        q-agt: false
+        q-dhcp: false
+        q-l3: false
+        q-meta: false
+        q-metering: false
+        s-account: false
+        s-container-sync: false
+        s-container: false
+        s-object: false
+        s-proxy: false
+        tls-proxy: true
+        q-qos: true
+        q-port-forwarding: true
+
+- job:
+    name: neutron-ovn-tempest-ovs-master
+    description: Job testing for devstack/tempest testing Neutron with ovn driver and OVN master branch
+    parent: neutron-ovn-base
+    vars:
+      devstack_localrc:
+        OVN_BRANCH: master
+
+- job:
+    name: neutron-ovn-tempest-ovs-ipv6-only-base
+    description: Base job for devstack/tempest to test Neutron with ovn driver in an IPv6-only deployment
+    parent: devstack-tempest-ipv6
+    timeout: 10800
+    irrelevant-files: *irrelevant-files
+    required-projects: *ovn-base-required-projects
+    vars: *ovn-base-vars
+
+- job:
+    name: neutron-ovn-tempest-ovs-release-ipv6-only
+    description: Job testing for devstack/tempest testing Neutron with ovn driver and latest released OVN branch in an IPv6-only deployment
+    parent: neutron-ovn-tempest-ovs-ipv6-only-base
+    vars:
+      devstack_localrc:
+        OVN_BRANCH: v20.06.1
+        # TODO(jlibosva): v2.13.1 is incompatible with kernel 4.15.0-118, sticking to commit hash until new v2.13 tag is created
+        OVS_BRANCH: 0047ca3a0290f1ef954f2c76b31477cf4b9755f5
+
+- job:
+    name: neutron-ovn-tempest-ovs-release
+    description: Job testing for devstack/tempest testing Neutron with ovn driver and latest released OVN branch
+    parent: neutron-ovn-base
+    vars:
+      devstack_localrc:
+        OVN_BRANCH: v20.06.1
+        # TODO(jlibosva): v2.13.1 is incompatible with kernel 4.15.0-118, sticking to commit hash until new v2.13 tag is created
+        OVS_BRANCH: 0047ca3a0290f1ef954f2c76b31477cf4b9755f5
+
+- job:
+    name: neutron-ovn-tempest-ovs-master-fedora
+    description: Job testing for devstack/tempest testing Neutron with ovn driver and OVN master branch and Fedora
+    parent: neutron-ovn-tempest-ovs-master
+    nodeset: devstack-single-node-fedora-latest
+    vars:
+      devstack_localrc:
+        OVN_BRANCH: master
+        OVS_BRANCH: master
